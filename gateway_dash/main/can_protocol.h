@@ -7,7 +7,7 @@
 #define CAN_ID_ENGINE_DATA  0x100  // Données dynamiques du moteur
 #define CAN_ID_HEARTBEAT    0x104  // Statut système et erreurs
 
-// Structure du message Moteur (Taille : 4 octets)
+// Struttura del messaggio del motore (dimensione: 4 byte)
 typedef struct __attribute__((packed)) {
     uint16_t rpm;          // Tr/min (0 à 5000)
     int8_t   temperature;  // Température en °C (-40 à 125)
