@@ -16,27 +16,29 @@
 #define WIFI_SSID      "ESP32_Automotive_Network"
 #define WIFI_PASS      "12345678"
 
-
 static const char *TAG = "GATEWAY_NET";
-// AJOUTEZ CETTE LIGNE ICI :
 static httpd_handle_t server = NULL; 
 
-
-
-// Variables globales partagées pour stocker les dernières valeurs reçues du bus CAN
+// Variables globales partagées
 static uint16_t global_rpm = 0;
 static int8_t   global_temp = 0;
 static uint8_t  global_fuel = 0;
+static uint8_t  global_status = 0; // Stocke le masque d'erreur du Heartbeat
 
-// Page Web Dashboard avec script Fetch synchrone à haute fréquence (Toutes les 200ms)
+// Page Web Dashboard avec gestion dynamique des alertes de pannes
 const char* html_page = 
 "<!DOCTYPE html><html><head><meta charset='utf-8'><title>CAN Dashboard</title>"
 "<style>body{font-family:Arial;background:#111;color:#fff;text-align:center;padding-top:30px;}"
-".card{background:#222;padding:20px;margin:15px auto;width:300px;border-radius:10px;border:1px solid #333;}"
-".val{font-size:32px;color:#00ffcc;font-weight:bold;}</style></head>"
+".card{background:#222;padding:20px;margin:15px auto;width:300px;border-radius:10px;border:1px solid #333; transition: 0.3s;}"
+".val{font-size:32px;color:#00ffcc;font-weight:bold;}"
+".status-ok{background:#1e4620; padding:10px; margin:10px auto; width:300px; border-radius:5px;}"
+".status-err{background:#7a1c1c; padding:10px; margin:10px auto; width:300px; border-radius:5px; color:#ff9999; font-weight:bold; animation: blink 1s infinite;}"
+"@keyframes blink{0%{opacity:1;}50%{opacity:0.5;}100%{opacity:1;}}"
+"</style></head>"
 "<body><h1>Automotive CAN Gateway</h1>"
-"<div class='card'><h2>Régime Moteur</h2><div id='rpm' class='val'>0</div> tr/min</div>"
-"<div class='card'><h2>Température</h2><div id='temp' class='val'>0</div> °C</div>"
+"<div id='status_box' class='status-ok'>SYSTÈME : EN ORDRE</div>"
+"<div class='card' id='rpm_card'><h2>Régime Moteur</h2><div id='rpm' class='val'>0</div> tr/min</div>"
+"<div class='card' id='temp_card'><h2>Température</h2><div id='temp' class='val'>0</div> °C</div>"
 "<div class='card'><h2>Carburant</h2><div id='fuel' class='val'>0</div> %</div>"
 "<script>"
 "setInterval(function(){"
@@ -44,29 +46,39 @@ const char* html_page =
 "    document.getElementById('rpm').innerHTML = d.rpm;"
 "    document.getElementById('temp').innerHTML = d.temp;"
 "    document.getElementById('fuel').innerHTML = d.fuel;"
+"    var sBox = document.getElementById('status_box');"
+"    var tCard = document.getElementById('temp_card');"
+"    if((d.status & 0x02) !== 0){"
+"      sBox.innerHTML = 'ALERTE : SURCHAUFFE MOTEUR CRITIQUE !';"
+"      sBox.className = 'status-err';"
+"      tCard.style.borderColor = '#ff3333';"
+"    } else {"
+"      sBox.innerHTML = 'SYSTÈME : EN ORDRE';"
+"      sBox.className = 'status-ok';"
+"      tCard.style.borderColor = '#333';"
+"    }"
 "  }).catch(err => console.error(err));"
-"}, 200);" // Rafraîchissement automatique à 5Hz pour coller au rythme du bus CAN
+"}, 200);"
 "</script></body></html>";
 
-// Handler pour envoyer la page HTML
 esp_err_t get_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_page, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
-// Handler pour envoyer le flux JSON des données CAN
 esp_err_t data_handler(httpd_req_t *req) {
     char json_buffer[128];
-    snprintf(json_buffer, sizeof(json_buffer), "{\"rpm\":%u,\"temp\":%d,\"fuel\":%u}", 
-             global_rpm, global_temp, global_fuel);
+    // On ajoute la variable "status" dans le paquet de données JSON transmis au navigateur
+    snprintf(json_buffer, sizeof(json_buffer), "{\"rpm\":%u,\"temp\":%d,\"fuel\":%u,\"status\":%u}", 
+             global_rpm, global_temp, global_fuel, global_status);
              
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_buffer, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
-// Tâche de réception CAN (Met à jour les variables globales en continu)
+// Tâche de réception CAN multi-identifiants
 void can_rx_task_sync(void *pvParameters) {
     twai_message_t rx_msg;
 
@@ -75,13 +87,17 @@ void can_rx_task_sync(void *pvParameters) {
             if (rx_msg.identifier == CAN_ID_ENGINE_DATA) {
                 can_engine_data_t data;
                 memcpy(&data, rx_msg.data, sizeof(can_engine_data_t));
-                
-                // Stockage immédiat des valeurs dans notre zone tampon sécurisée
                 global_rpm = data.rpm;
                 global_temp = data.temperature;
                 global_fuel = data.fuel_level;
+            } 
+            // Interception des messages de diagnostic / Heartbeat
+            else if (rx_msg.identifier == CAN_ID_HEARTBEAT) {
+                can_heartbeat_t hbeat;
+                memcpy(&hbeat, rx_msg.data, sizeof(can_heartbeat_t));
+                global_status = hbeat.status_mask; // Extraction du masque de panne
                 
-                ESP_LOGI(TAG, "[CAN ➔ RAM] Updated: RPM=%u Temp=%d Fuel=%u", global_rpm, global_temp, global_fuel);
+                ESP_LOGW(TAG, "[DIAGNOSTIC] Heartbeat recu - Statut: 0x%02X | Compteur: %u", global_status, hbeat.counter);
             }
         }
     }
@@ -92,15 +108,13 @@ void start_web_server(void) {
     config.max_open_sockets = 5;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Route 1 : Page d'accueil HTML
         httpd_uri_t uri_get = { .uri = "/", .method = HTTP_GET, .handler = get_handler };
         httpd_register_uri_handler(server, &uri_get);
 
-        // Route 2 : Endpoint API JSON
         httpd_uri_t uri_data = { .uri = "/data", .method = HTTP_GET, .handler = data_handler };
         httpd_register_uri_handler(server, &uri_data);
         
-        ESP_LOGI(TAG, "Serveur Web de streaming JSON initialisé.");
+        ESP_LOGI(TAG, "Serveur de Diagnostic Web en ligne.");
     }
 }
 
@@ -138,7 +152,6 @@ void init_wifi(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "Wi-Fi Hotspot actif. SSID: %s", WIFI_SSID);
 }
 
 void init_can(void) {
@@ -163,4 +176,5 @@ void app_main(void) {
 
     xTaskCreate(can_rx_task_sync, "CanRxTaskSync", 4096, NULL, 6, NULL);
 }
+
 
