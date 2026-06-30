@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Identifiants des messages CAN (11-bit Standard ID)
+// identificatori di messaggi CAN (11-bit Standard ID)
 #define CAN_ID_ENGINE_DATA  0x100  // Données dynamiques du moteur
 #define CAN_ID_HEARTBEAT    0x104  // Statut système et erreurs
 
