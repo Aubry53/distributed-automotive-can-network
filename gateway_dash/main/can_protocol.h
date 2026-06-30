@@ -14,7 +14,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  fuel_level;   // Livello del carburante in % (da 0 a 100)
 } can_engine_data_t;
 
-// Struttura del messaggio Battito cardiaco (Taille : 2 ottetti)
+// Struttura del messaggio Battito cardiaco (dimensione : 2 ottetti)
 typedef struct __attribute__((packed)) {
     uint8_t status_mask;  // Bit 0: Motor ON/OFF, Bit 1: Alert Temp, Bit 2: Errore del sensore
     uint8_t counter;      // Contatore di invio ciclico (da 0 a 255)
