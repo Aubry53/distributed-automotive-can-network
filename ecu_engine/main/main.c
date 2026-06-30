@@ -20,7 +20,7 @@ void init_can(void) {
     ESP_ERROR_CHECK(twai_start());
 }
 
-// Tâche 1 : Simulation du moteur avec consommation et panne thermique
+// Compito 1: Simulazione del motore con consumo di carburante e guasto termico
 void engine_simulation_task(void *pvParameters) {
     can_engine_data_t current_data = { .rpm = 850, .temperature = 25, .fuel_level = 100 };
     twai_message_t tx_msg = { .identifier = CAN_ID_ENGINE_DATA, .data_length_code = sizeof(can_engine_data_t) };
@@ -29,20 +29,20 @@ void engine_simulation_task(void *pvParameters) {
     while (1) {
         loop_counter++;
         
-        // 1. Oscillation des RPM
+        // 1. Oscillazione dei giri al minuto
         current_data.rpm += (esp_random() % 30) - 14;
         if (current_data.rpm < 800) current_data.rpm = 800;
 
-        // 2. Simulation d'une consommation de carburant (baisse toutes les 10 secondes)
+        // 2. Simulazione del consumo di carburante (diminuisce ogni 10 secondi)
         if (loop_counter % 50 == 0 && current_data.fuel_level > 0) {
             current_data.fuel_level--;
         }
 
-        // 3. Simulation d'une panne : après 30 secondes, surchauffe critique à 115°C
+        // 3. Simulazione di guasto: dopo 30 secondi, surriscaldamento critico a 115 °C
         if (loop_counter > 150) { 
             current_data.temperature = 115; 
         } else if (current_data.temperature < 90) {
-            current_data.temperature += 1; // Chauffe normale au départ
+            current_data.temperature += 1; // Riscaldamento normale all'avvio
         }
 
         memcpy(tx_msg.data, &current_data, tx_msg.data_length_code);
@@ -52,7 +52,7 @@ void engine_simulation_task(void *pvParameters) {
     }
 }
 
-// Tâche 2 : Heartbeat cyclique (Battement de cœur du système)
+// Compito 2: Heart Beat ciclico (Heart Beat sistemico)
 void heartbeat_task(void *pvParameters) {
     can_heartbeat_t hbeat = { .status_mask = 0x01, .counter = 0 }; // 0x01 = Engine Running
     twai_message_t tx_msg = { .identifier = CAN_ID_HEARTBEAT, .data_length_code = sizeof(can_heartbeat_t) };
@@ -60,22 +60,22 @@ void heartbeat_task(void *pvParameters) {
     while (1) {
         hbeat.counter++;
         
-        // Si le moteur surchauffe, on lève le bit d'erreur 1 (Alerte Temp) dans le masque de statut
+        // Se il motore si surriscalda, il bit di errore 1 (Avviso di temperatura) viene attivato nella maschera di stato.
         if (hbeat.counter > 30) {
-            hbeat.status_mask |= 0x02; // Injection d'erreur dans le protocole
+            hbeat.status_mask |= 0x02; // Iniezione di errori nel protocollo
         }
 
         memcpy(tx_msg.data, &hbeat, tx_msg.data_length_code);
         twai_transmit(&tx_msg, pdMS_TO_TICKS(50));
         
         ESP_LOGI(TAG, "[CAN TX ➔ HEARTBEAT] Sent status: 0x%02X | Count: %u", hbeat.status_mask, hbeat.counter);
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 1Hz (Toutes les secondes)
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 1Hz (Ogni secondo)
     }
 }
 
 void app_main(void) {
     init_can();
-    // Utilisation de FreeRTOS pour lancer deux tâches concurrentes en parallèle
+    // Utilizzo di FreeRTOS per eseguire due attività simultanee in parallelo
     xTaskCreate(engine_simulation_task, "EngineSim", 4096, NULL, 5, NULL);
     xTaskCreate(heartbeat_task, "Heartbeat", 4096, NULL, 5, NULL);
 }
