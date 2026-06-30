@@ -19,13 +19,13 @@
 static const char *TAG = "GATEWAY_NET";
 static httpd_handle_t server = NULL; 
 
-// Variables globales partagées
+// Variabili globali condivise
 static uint16_t global_rpm = 0;
 static int8_t   global_temp = 0;
 static uint8_t  global_fuel = 0;
-static uint8_t  global_status = 0; // Stocke le masque d'erreur du Heartbeat
+static uint8_t  global_status = 0; // Memorizza la maschera di errore Heartbeat
 
-// Page Web Dashboard avec gestion dynamique des alertes de pannes
+// Pagina del pannello di controllo web con gestione dinamica degli avvisi di guasto
 const char* html_page = 
 "<!DOCTYPE html><html><head><meta charset='utf-8'><title>CAN Dashboard</title>"
 "<style>body{font-family:Arial;background:#111;color:#fff;text-align:center;padding-top:30px;}"
@@ -69,7 +69,7 @@ esp_err_t get_handler(httpd_req_t *req) {
 
 esp_err_t data_handler(httpd_req_t *req) {
     char json_buffer[128];
-    // On ajoute la variable "status" dans le paquet de données JSON transmis au navigateur
+    //La variabile "status" viene aggiunta al pacchetto di dati JSON inviato al browser
     snprintf(json_buffer, sizeof(json_buffer), "{\"rpm\":%u,\"temp\":%d,\"fuel\":%u,\"status\":%u}", 
              global_rpm, global_temp, global_fuel, global_status);
              
@@ -78,7 +78,7 @@ esp_err_t data_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Tâche de réception CAN multi-identifiants
+// Attività di ricezione CAN multi-ID
 void can_rx_task_sync(void *pvParameters) {
     twai_message_t rx_msg;
 
@@ -91,11 +91,11 @@ void can_rx_task_sync(void *pvParameters) {
                 global_temp = data.temperature;
                 global_fuel = data.fuel_level;
             } 
-            // Interception des messages de diagnostic / Heartbeat
+            // Intercettazione di messaggi diagnostici / Heartbeat
             else if (rx_msg.identifier == CAN_ID_HEARTBEAT) {
                 can_heartbeat_t hbeat;
                 memcpy(&hbeat, rx_msg.data, sizeof(can_heartbeat_t));
-                global_status = hbeat.status_mask; // Extraction du masque de panne
+                global_status = hbeat.status_mask; // Estrazione della maschera di guasto
                 
                 ESP_LOGW(TAG, "[DIAGNOSTIC] Heartbeat recu - Statut: 0x%02X | Compteur: %u", global_status, hbeat.counter);
             }
